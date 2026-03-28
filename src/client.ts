@@ -46,8 +46,10 @@ export class CanvasClient {
   private baseURL: string;
   private maxRetries: number = 3;
   private retryDelay: number = 1000;
+  private onUnauthorized?: () => Promise<string | null>;
+  private refreshPromise: Promise<string | null> | null = null;
 
-  constructor(token: string, domain: string, options?: { maxRetries?: number; retryDelay?: number }) {
+  constructor(token: string | undefined, domain: string, options?: { maxRetries?: number; retryDelay?: number }) {
     this.baseURL = `https://${domain}/api/v1`;
     this.maxRetries = options?.maxRetries ?? 3;
     this.retryDelay = options?.retryDelay ?? 1000;
@@ -55,13 +57,21 @@ export class CanvasClient {
     this.client = axios.create({
       baseURL: this.baseURL,
       headers: {
-        'Authorization': `Bearer ${token}`,
+        'Authorization': token ? `Bearer ${token}` : '',
         'Content-Type': 'application/json'
       },
       timeout: 30000 // 30 second timeout
     });
 
     this.setupInterceptors();
+  }
+
+  updateToken(newToken: string): void {
+    this.client.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
+  }
+
+  setOnUnauthorized(handler: () => Promise<string | null>): void {
+    this.onUnauthorized = handler;
   }
 
   private setupInterceptors(): void {
@@ -102,7 +112,26 @@ export class CanvasClient {
       },
       async (error: AxiosError) => {
         const config = error.config as any;
-        
+
+        // 401 interception: attempt token refresh before retrying
+        if (error.response?.status === 401 && config && !config.__authRetried && this.onUnauthorized) {
+          config.__authRetried = true;
+
+          // Mutex: if a refresh is already in flight, wait for it
+          if (!this.refreshPromise) {
+            this.refreshPromise = this.onUnauthorized().finally(() => {
+              this.refreshPromise = null;
+            });
+          }
+
+          const newToken = await this.refreshPromise;
+          if (newToken) {
+            this.updateToken(newToken);
+            config.headers['Authorization'] = `Bearer ${newToken}`;
+            return this.client.request(config);
+          }
+        }
+
         // Retry logic for specific errors
         if (this.shouldRetry(error) && config && config.__retryCount < this.maxRetries) {
           config.__retryCount = config.__retryCount || 0;

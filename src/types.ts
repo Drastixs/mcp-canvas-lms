@@ -680,7 +680,7 @@ export interface FileUploadArgs {
 
 // Configuration interfaces
 export interface CanvasClientConfig {
-  token: string;
+  token?: string;
   domain: string;
   maxRetries?: number;
   retryDelay?: number;

@@ -51,3 +51,9 @@ tmp/
 
 # Testing
 .vitest/
+
+# Python auth venv
+auth/.venv/
+
+# Ruff cache
+.ruff_cache/

@@ -39,9 +39,37 @@ import { randomUUID } from "node:crypto";
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { loadTokens, saveTokens, clearAccessToken, type StoredTokens } from './auth/token-store.js';
+import { fetchMobileCredentials } from './auth/mobile-verify.js';
+import { refreshAccessToken, RefreshTokenExpiredError } from './auth/token-refresh.js';
+import { ensurePythonVenv } from './auth/setup-venv.js';
+import { runPythonAuth, NoDisplayError } from './auth/python-auth.js';
 
 // Enhanced tools list with all student-focused endpoints
 const RAW_TOOLS: Tool[] = [
+  // Authentication tools
+  {
+    name: "canvas_authenticate",
+    description: "Authenticate with Canvas LMS via Microsoft SSO. Opens a browser for login. You should only need to run this once. If you have issues, go to Settings > Access Tokens in Canvas. Email and password are read from CANVAS_EMAIL and CANVAS_PASSWORD environment variables if not provided.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        email: { type: "string", description: "University email address (optional — defaults to CANVAS_EMAIL env var)" },
+        password: { type: "string", description: "University password (optional — defaults to CANVAS_PASSWORD env var)" }
+      },
+      required: []
+    }
+  },
+  {
+    name: "canvas_check_auth",
+    description: "Check authentication status: whether tokens are stored, token age, user info, and domain.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      required: []
+    }
+  },
+
   // Health and system tools
   {
     name: "canvas_health_check",
@@ -831,7 +859,7 @@ type StructuredToolError = {
   retryable: boolean;
   suggestion: string;
   message: string;
-  code: "validation_error" | "canvas_api_error" | "unknown_tool" | "internal_error";
+  code: "validation_error" | "canvas_api_error" | "unknown_tool" | "internal_error" | "auth_required" | "refresh_token_expired";
   tool: string;
 };
 
@@ -978,7 +1006,7 @@ const TOOLS: Tool[] = RAW_TOOLS.map((tool) => ({
 export class CanvasMCPServer {
   private readonly server: Server;
   private readonly client: CanvasClient;
-  private readonly config: MCPServerConfig;
+  private config: MCPServerConfig;
   private streamableHttpRuntime: StreamableHttpRuntime | undefined;
 
   constructor(config: MCPServerConfig, client?: CanvasClient) {
@@ -991,6 +1019,11 @@ export class CanvasMCPServer {
         retryDelay: config.canvas.retryDelay
       }
     );
+
+    // Wire up automatic token refresh on 401
+    this.client.setOnUnauthorized(async () => {
+      return this.handleTokenRefresh();
+    });
 
     this.server = new Server(
       {
@@ -1007,6 +1040,41 @@ export class CanvasMCPServer {
 
     this.setupHandlers();
     this.setupErrorHandling();
+  }
+
+  private async handleTokenRefresh(): Promise<string | null> {
+    const stored = loadTokens(this.config.canvas.domain);
+    if (!stored?.refresh_token || !stored?.client_id || !stored?.client_secret) {
+      console.error('[Auth] No refresh token available — re-authentication required.');
+      return null;
+    }
+
+    try {
+      console.error('[Auth] Access token expired. Refreshing...');
+      const result = await refreshAccessToken({
+        domain: this.config.canvas.domain,
+        clientId: stored.client_id,
+        clientSecret: stored.client_secret,
+        refreshToken: stored.refresh_token,
+      });
+
+      saveTokens({
+        ...stored,
+        access_token: result.access_token,
+        last_refreshed_at: new Date().toISOString(),
+      });
+
+      this.config.canvas.token = result.access_token;
+      console.error('[Auth] Token refreshed successfully.');
+      return result.access_token;
+    } catch (error) {
+      if (error instanceof RefreshTokenExpiredError) {
+        console.error('[Auth] Refresh token expired or revoked. Re-authentication required.');
+        clearAccessToken();
+        this.config.canvas.token = undefined;
+      }
+      return null;
+    }
   }
 
   private setupErrorHandling(): void {
@@ -1290,8 +1358,124 @@ export class CanvasMCPServer {
         const toolName = request.params.name;
         
         console.error(`[Canvas MCP] Executing tool: ${toolName}`);
-        
+
+        // Auth guard: block all tools except auth tools if no token
+        const AUTH_EXEMPT_TOOLS = ['canvas_authenticate', 'canvas_check_auth'];
+        if (!AUTH_EXEMPT_TOOLS.includes(toolName) && !this.config.canvas.token) {
+          // Try loading from token store in case it was saved after startup
+          const stored = loadTokens(this.config.canvas.domain);
+          if (stored?.access_token) {
+            this.client.updateToken(stored.access_token);
+            this.config.canvas.token = stored.access_token;
+          } else {
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  status: "error",
+                  code: "auth_required",
+                  retryable: false,
+                  message: "Not authenticated with Canvas. No access token available.",
+                  suggestion: "Call the canvas_authenticate tool to set up authentication (credentials are read from CANVAS_EMAIL and CANVAS_PASSWORD env vars). You should only have to do this once. If you have issues, go to Settings > Access Tokens in Canvas.",
+                  tool: toolName
+                }, null, 2)
+              }],
+              isError: true
+            };
+          }
+        }
+
         switch (toolName) {
+          // Authentication tools
+          case "canvas_authenticate": {
+            const rawArgs = args as { email?: string; password?: string };
+            const email = rawArgs.email || process.env.CANVAS_EMAIL;
+            const password = rawArgs.password || process.env.CANVAS_PASSWORD;
+            if (!email || !password) {
+              throw new Error(
+                "Missing credentials. Either pass email/password as arguments, or set CANVAS_EMAIL and CANVAS_PASSWORD environment variables."
+              );
+            }
+
+            console.error('[Auth] Starting Canvas authentication flow...');
+            console.error('[Auth] You should only have to run this once. If you have any issues, go to Settings > Access Tokens in Canvas.');
+
+            // 1. Fetch mobile credentials
+            const creds = await fetchMobileCredentials(this.config.canvas.domain);
+
+            // 2. Ensure Python venv is ready
+            const __filename = fileURLToPath(import.meta.url);
+            const repoRoot = path.resolve(path.dirname(__filename), '..');
+            const pythonPath = await ensurePythonVenv(repoRoot);
+
+            // 3. Run Python auth script
+            const scriptPath = path.join(repoRoot, 'auth', 'get_canvas_token.py');
+            const tokens = await runPythonAuth({
+              pythonPath,
+              scriptPath,
+              clientId: creds.client_id,
+              clientSecret: creds.client_secret,
+              domain: this.config.canvas.domain,
+              email,
+              password,
+            });
+
+            // 4. Save tokens
+            saveTokens({
+              canvas_domain: this.config.canvas.domain,
+              access_token: tokens.access_token,
+              refresh_token: tokens.refresh_token,
+              client_id: creds.client_id,
+              client_secret: creds.client_secret,
+              obtained_at: new Date().toISOString(),
+              last_refreshed_at: new Date().toISOString(),
+              user: tokens.user,
+            });
+
+            // 5. Update the live client
+            this.client.updateToken(tokens.access_token);
+            this.config.canvas.token = tokens.access_token;
+
+            return {
+              content: [{
+                type: "text",
+                text: JSON.stringify({
+                  status: "authenticated",
+                  message: "Successfully authenticated with Canvas. You should only have to run this once. If you have any issues, go to Settings > Access Tokens in Canvas.",
+                  user: tokens.user,
+                }, null, 2)
+              }]
+            };
+          }
+
+          case "canvas_check_auth": {
+            const stored = loadTokens(this.config.canvas.domain);
+            const hasEnvToken = !!process.env.CANVAS_API_TOKEN;
+
+            const status: Record<string, unknown> = {
+              authenticated: !!this.config.canvas.token,
+              domain: this.config.canvas.domain,
+              token_source: hasEnvToken ? 'environment_variable' : (stored?.access_token ? 'token_store' : 'none'),
+              has_refresh_token: !!stored?.refresh_token,
+            };
+
+            if (stored) {
+              status.user = stored.user;
+              status.obtained_at = stored.obtained_at;
+              status.last_refreshed_at = stored.last_refreshed_at;
+              const age = Date.now() - new Date(stored.last_refreshed_at).getTime();
+              status.access_token_age_minutes = Math.round(age / 60000);
+            }
+
+            if (!this.config.canvas.token) {
+              status.suggestion = 'Call canvas_authenticate to set up authentication (credentials are read from CANVAS_EMAIL/CANVAS_PASSWORD env vars). You should only have to do this once.';
+            }
+
+            return {
+              content: [{ type: "text", text: JSON.stringify(status, null, 2) }]
+            };
+          }
+
           // Health check
           case "canvas_health_check": {
             const health = await this.client.healthCheck();
@@ -2100,13 +2284,24 @@ export function loadEnvironmentVariables(): void {
 }
 
 export function loadConfigFromEnvironment(env = process.env): MCPServerConfig {
-  const token = env.CANVAS_API_TOKEN;
   const domain = env.CANVAS_DOMAIN;
 
-  if (!token || !domain) {
+  if (!domain) {
     throw new Error(
-      "Missing required environment variables: CANVAS_API_TOKEN and CANVAS_DOMAIN are required."
+      "Missing required environment variable: CANVAS_DOMAIN is required."
     );
+  }
+
+  // Token priority: env var > token store > undefined (auth required)
+  let token = env.CANVAS_API_TOKEN;
+  if (!token) {
+    const stored = loadTokens(domain);
+    token = stored?.access_token || undefined;
+    if (token) {
+      console.error('[Auth] Loaded access token from token store.');
+    } else {
+      console.error('[Auth] No access token found. Use canvas_authenticate tool to log in.');
+    }
   }
 
   const transportMode = env.MCP_TRANSPORT === "streamable-http" ? "streamable-http" : "stdio";

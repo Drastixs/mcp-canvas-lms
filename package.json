@@ -96,6 +96,8 @@
   },
   "files": [
     "build/**/*",
+    "auth/**/*",
+    "!auth/.venv",
     "README.md",
     "LICENSE",
     "package.json"
