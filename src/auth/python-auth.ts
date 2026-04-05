@@ -1,10 +1,6 @@
 // src/auth/python-auth.ts
 
 import { spawn } from 'node:child_process';
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
-
-const execFileAsync = promisify(execFile);
 
 export interface PythonAuthParams {
   pythonPath: string;
@@ -22,38 +18,7 @@ export interface PythonAuthResult {
   user: { id: number; name: string };
 }
 
-export class NoDisplayError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'NoDisplayError';
-  }
-}
-
-async function hasXvfb(): Promise<boolean> {
-  try {
-    await execFileAsync('which', ['xvfb-run']);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function hasDisplay(): boolean {
-  return !!(process.env.DISPLAY || process.env.WAYLAND_DISPLAY);
-}
-
 export async function runPythonAuth(params: PythonAuthParams): Promise<PythonAuthResult> {
-  const useXvfb = !hasDisplay() && await hasXvfb();
-
-  if (!hasDisplay() && !useXvfb) {
-    throw new NoDisplayError(
-      'No display available for browser authentication. Options:\n' +
-      '  (a) Run from a GUI session\n' +
-      '  (b) Install xvfb: sudo apt install xvfb\n' +
-      `  (c) Generate a token manually at https://${params.domain}/profile/settings > Access Tokens`
-    );
-  }
-
   const env: Record<string, string> = {
     ...process.env as Record<string, string>,
     CANVAS_DOMAIN: params.domain,
@@ -63,10 +28,8 @@ export async function runPythonAuth(params: PythonAuthParams): Promise<PythonAut
     CANVAS_PASSWORD: params.password,
   };
 
-  const command = useXvfb ? 'xvfb-run' : params.pythonPath;
-  const args = useXvfb
-    ? ['--auto-servernum', '--server-args=-screen 0 1024x768x24', params.pythonPath, params.scriptPath]
-    : [params.scriptPath];
+  const command = params.pythonPath;
+  const args = [params.scriptPath];
 
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {

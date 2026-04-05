@@ -43,7 +43,7 @@ import { loadTokens, saveTokens, clearAccessToken, type StoredTokens } from './a
 import { fetchMobileCredentials } from './auth/mobile-verify.js';
 import { refreshAccessToken, RefreshTokenExpiredError } from './auth/token-refresh.js';
 import { ensurePythonVenv } from './auth/setup-venv.js';
-import { runPythonAuth, NoDisplayError } from './auth/python-auth.js';
+import { runPythonAuth } from './auth/python-auth.js';
 
 // Enhanced tools list with all student-focused endpoints
 const RAW_TOOLS: Tool[] = [
