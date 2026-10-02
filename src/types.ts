@@ -701,10 +701,14 @@ export interface MCPTransportConfig {
   http?: MCPTransportHttpConfig;
 }
 
+export type Toolset = 'student' | 'instructor' | 'admin';
+
 export interface MCPServerConfig {
   name: string;
   version: string;
   canvas: CanvasClientConfig;
+  // Which groups of tools to expose; defaults to ['student'].
+  toolsets?: Toolset[];
   transport?: MCPTransportConfig;
   logging?: {
     level: 'debug' | 'info' | 'warn' | 'error';

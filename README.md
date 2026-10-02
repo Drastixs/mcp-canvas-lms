@@ -62,6 +62,20 @@ npm run build
 
 Over 50 tools covering courses, assignments, grades, modules, discussions, quizzes, files, calendar, messaging, user profiles, rubrics, and account administration. Call `canvas_check_auth` to verify your authentication status.
 
+### Toolsets
+
+To keep the tool list (and your model's context) small, only the **student** toolset is exposed by default. Enable more with `CANVAS_TOOLSETS` (comma-separated):
+
+| Toolset | Tools |
+|---|---|
+| `student` (default) | Read courses, assignments, grades, modules, discussions, quizzes, files, pages, calendar, messages; submit work, post to discussions |
+| `instructor` | Create/update courses, assignments and quizzes; submit grades; enroll users |
+| `admin` | Account info, account courses/users, sub-accounts, create users, account reports |
+
+Example: `"CANVAS_TOOLSETS": "student,instructor"`, or `"all"` for everything.
+
+List tools return the first 5 items with null fields omitted; pass `include_raw: true` to get every item in full.
+
 ## Credits
 
 - Original MCP server: [DMontgomery40/mcp-canvas-lms](https://github.com/DMontgomery40/mcp-canvas-lms) (MIT License)

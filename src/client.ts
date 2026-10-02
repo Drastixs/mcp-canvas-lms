@@ -240,7 +240,7 @@ export class CanvasClient {
   // ---------------------
   async listCourses(includeEnded: boolean = false): Promise<CanvasCourse[]> {
     const params: any = {
-      include: ['total_students', 'teachers', 'term', 'course_progress']
+      include: ['term', 'course_progress']
     };
     
     if (!includeEnded) {
@@ -254,7 +254,7 @@ export class CanvasClient {
   async getCourse(courseId: number): Promise<CanvasCourse> {
     const response = await this.client.get(`/courses/${courseId}`, {
       params: {
-        include: ['total_students', 'teachers', 'term', 'course_progress', 'sections', 'syllabus_body']
+        include: ['total_students', 'teachers', 'term', 'course_progress', 'sections']
       }
     });
     return response.data;
@@ -285,7 +285,7 @@ export class CanvasClient {
   // ---------------------
   async listAssignments(courseId: number, includeSubmissions: boolean = false): Promise<CanvasAssignment[]> {
     const params: any = {
-      include: ['assignment_group', 'rubric', 'due_at']
+      include: []
     };
     
     if (includeSubmissions) {
@@ -683,11 +683,7 @@ export class CanvasClient {
   // DISCUSSION TOPICS (Enhanced)
   // ---------------------
   async listDiscussionTopics(courseId: number): Promise<CanvasDiscussionTopic[]> {
-    const response = await this.client.get(`/courses/${courseId}/discussion_topics`, {
-      params: {
-        include: ['assignment']
-      }
-    });
+    const response = await this.client.get(`/courses/${courseId}/discussion_topics`);
     return response.data;
   }
 
@@ -713,8 +709,7 @@ export class CanvasClient {
   async listAnnouncements(courseId: string): Promise<CanvasAnnouncement[]> {
     const response = await this.client.get(`/courses/${courseId}/discussion_topics`, {
       params: {
-        type: 'announcement',
-        include: ['assignment']
+        type: 'announcement'
       }
     });
     return response.data;

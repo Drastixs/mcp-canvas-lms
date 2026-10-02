@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Smaller `tools/list` payload** (~46.6 KB → ~16.1 KB by default)
+  - Tools are grouped into `student`, `instructor` and `admin` toolsets, selected with `CANVAS_TOOLSETS`. **Only `student` is exposed by default**; set `CANVAS_TOOLSETS=all` to restore the previous tool list.
+  - Removed the boilerplate sentences appended to every tool description
+  - `include_raw` is only offered on tools that return lists
+  - Annotations only include values that differ from MCP defaults
+  - Shorter property descriptions on course create/update
+- **Smaller tool results**: JSON is no longer pretty-printed, null fields are dropped (unless `include_raw`), and heavy Canvas `include[]` fields (syllabus body, rubrics, teachers) are no longer requested by list/get course and list assignment calls
+
+### Fixed
+- dotenv no longer writes its banner to stdout, which corrupted the stdio JSON-RPC stream
+- Transport tests: mock client was missing `setOnUnauthorized`
+
 ## [2.2.3] - 2025-06-27
 
 ### Fixed

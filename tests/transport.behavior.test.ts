@@ -1,6 +1,6 @@
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it } from "vitest";
-import { CanvasMCPServer, loadConfigFromEnvironment } from "../src/index.js";
+import { CanvasMCPServer, loadConfigFromEnvironment, parseToolsets, getToolsForToolsets } from "../src/index.js";
 
 type JsonRpcMessage = {
   jsonrpc: "2.0";
@@ -13,6 +13,10 @@ type JsonRpcMessage = {
 
 function createMockClient() {
   return {
+    setOnUnauthorized: () => {},
+    updateToken: () => {},
+    listCourses: async () =>
+      Array.from({ length: 8 }, (_, i) => ({ id: i + 1, name: `Course ${i + 1}`, sis_course_id: null })),
     healthCheck: async () => ({
       status: "ok",
       timestamp: "2026-02-24T00:00:00.000Z",
@@ -134,8 +138,17 @@ describe("stdio transport", () => {
     const tools = (listResponse.result?.tools as Array<Record<string, unknown>>) ?? [];
     const healthTool = tools.find((tool) => tool.name === "canvas_health_check");
     expect(healthTool).toBeTruthy();
-    expect((healthTool?.description as string) ?? "").toContain("Required fields");
     expect((healthTool?.inputSchema as Record<string, unknown>)?.additionalProperties).toBe(false);
+    expect((healthTool?.annotations as Record<string, unknown>)?.readOnlyHint).toBe(true);
+    // include_raw is only offered on list-returning tools
+    const healthProps = (healthTool?.inputSchema as Record<string, Record<string, unknown>>).properties;
+    expect(healthProps.include_raw).toBeUndefined();
+    const listCoursesTool = tools.find((tool) => tool.name === "canvas_list_courses");
+    const listProps = (listCoursesTool?.inputSchema as Record<string, Record<string, unknown>>).properties;
+    expect(listProps.include_raw).toBeTruthy();
+    // default toolset is student-only
+    expect(tools.find((tool) => tool.name === "canvas_create_course")).toBeUndefined();
+    expect(tools.find((tool) => tool.name === "canvas_create_user")).toBeUndefined();
 
     stdin.write(
       `${JSON.stringify({
@@ -165,6 +178,58 @@ describe("stdio transport", () => {
     expect(structuredError.status).toBe("error");
     expect(structuredError.retryable).toBe(false);
     expect(structuredError.suggestion).toBeTruthy();
+
+    stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 5,
+        method: "tools/call",
+        params: { name: "canvas_list_courses", arguments: {} }
+      })}\n`
+    );
+    const listCall = await waitForResponse(responses, 5);
+    const listText = ((listCall.result?.content as Array<Record<string, unknown>>)[0]?.text ?? "{}") as string;
+    expect(listText).not.toContain("\n");
+    const listPayload = parseJson(listText);
+    expect(listPayload.count).toBe(8);
+    expect(listPayload.has_more).toBe(true);
+    const items = listPayload.items as Array<Record<string, unknown>>;
+    expect(items).toHaveLength(5);
+    expect(items[0]).not.toHaveProperty("sis_course_id");
+
+    stdin.write(
+      `${JSON.stringify({
+        jsonrpc: "2.0",
+        id: 6,
+        method: "tools/call",
+        params: { name: "canvas_create_course", arguments: { account_id: 1, name: "X" } }
+      })}\n`
+    );
+    const disabledCall = await waitForResponse(responses, 6);
+    const disabledResult = disabledCall.result as Record<string, unknown>;
+    expect(disabledResult.isError).toBe(true);
+    expect((disabledResult.structuredContent as Record<string, unknown>).message).toContain("CANVAS_TOOLSETS");
+  });
+});
+
+describe("toolsets", () => {
+  it("parses CANVAS_TOOLSETS", () => {
+    expect(parseToolsets(undefined)).toEqual(["student"]);
+    expect(parseToolsets("")).toEqual(["student"]);
+    expect(parseToolsets("admin, student")).toEqual(["student", "admin"]);
+    expect(parseToolsets("all")).toEqual(["student", "instructor", "admin"]);
+    expect(() => parseToolsets("teacher")).toThrow(/Invalid CANVAS_TOOLSETS/);
+  });
+
+  it("filters tools by toolset", () => {
+    const student = getToolsForToolsets(["student"]).map((tool) => tool.name);
+    const all = getToolsForToolsets(["student", "instructor", "admin"]).map((tool) => tool.name);
+    expect(student).toContain("canvas_list_courses");
+    expect(student).not.toContain("canvas_submit_grade");
+    expect(student).not.toContain("canvas_list_sub_accounts");
+    expect(all).toContain("canvas_submit_grade");
+    expect(all).toContain("canvas_list_sub_accounts");
+    expect(all.length).toBeGreaterThan(student.length);
   });
 });
 

@@ -30,7 +30,8 @@ import {
   ListAccountCoursesArgs,
   ListAccountUsersArgs,
   CreateReportArgs,
-  CanvasAPIError
+  CanvasAPIError,
+  type Toolset
 } from "./types.js";
 import { createServer as createHttpServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { type Readable, type Writable } from "node:stream";
@@ -113,26 +114,26 @@ const RAW_TOOLS: Tool[] = [
         account_id: { type: "number", description: "ID of the account to create the course in" },
         name: { type: "string", description: "Name of the course" },
         course_code: { type: "string", description: "Course code (e.g., CS101)" },
-        start_at: { type: "string", description: "Course start date (ISO format)" },
-        end_at: { type: "string", description: "Course end date (ISO format)" },
-        license: { type: "string", description: "Course license" },
-        is_public: { type: "boolean", description: "Whether the course is public" },
-        is_public_to_auth_users: { type: "boolean", description: "Whether the course is public to authenticated users" },
-        public_syllabus: { type: "boolean", description: "Whether the syllabus is public" },
-        public_syllabus_to_auth: { type: "boolean", description: "Whether the syllabus is public to authenticated users" },
-        public_description: { type: "string", description: "Public description of the course" },
-        allow_student_wiki_edits: { type: "boolean", description: "Whether students can edit the wiki" },
-        allow_wiki_comments: { type: "boolean", description: "Whether wiki comments are allowed" },
-        allow_student_forum_attachments: { type: "boolean", description: "Whether students can add forum attachments" },
-        open_enrollment: { type: "boolean", description: "Whether the course has open enrollment" },
-        self_enrollment: { type: "boolean", description: "Whether the course allows self enrollment" },
-        restrict_enrollments_to_course_dates: { type: "boolean", description: "Whether to restrict enrollments to course start/end dates" },
+        start_at: { type: "string", description: "ISO 8601" },
+        end_at: { type: "string", description: "ISO 8601" },
+        license: { type: "string" },
+        is_public: { type: "boolean" },
+        is_public_to_auth_users: { type: "boolean" },
+        public_syllabus: { type: "boolean" },
+        public_syllabus_to_auth: { type: "boolean" },
+        public_description: { type: "string" },
+        allow_student_wiki_edits: { type: "boolean" },
+        allow_wiki_comments: { type: "boolean" },
+        allow_student_forum_attachments: { type: "boolean" },
+        open_enrollment: { type: "boolean" },
+        self_enrollment: { type: "boolean" },
+        restrict_enrollments_to_course_dates: { type: "boolean" },
         term_id: { type: "number", description: "ID of the enrollment term" },
-        sis_course_id: { type: "string", description: "SIS course ID" },
-        integration_id: { type: "string", description: "Integration ID for the course" },
-        hide_final_grades: { type: "boolean", description: "Whether to hide final grades" },
-        apply_assignment_group_weights: { type: "boolean", description: "Whether to apply assignment group weights" },
-        time_zone: { type: "string", description: "Course time zone" },
+        sis_course_id: { type: "string" },
+        integration_id: { type: "string" },
+        hide_final_grades: { type: "boolean" },
+        apply_assignment_group_weights: { type: "boolean" },
+        time_zone: { type: "string" },
         syllabus_body: { type: "string", description: "Course syllabus content" }
       },
       required: ["account_id", "name"]
@@ -147,23 +148,23 @@ const RAW_TOOLS: Tool[] = [
         course_id: { type: "number", description: "ID of the course to update" },
         name: { type: "string", description: "New name for the course" },
         course_code: { type: "string", description: "New course code" },
-        start_at: { type: "string", description: "New start date (ISO format)" },
-        end_at: { type: "string", description: "New end date (ISO format)" },
-        license: { type: "string", description: "Course license" },
-        is_public: { type: "boolean", description: "Whether the course is public" },
-        is_public_to_auth_users: { type: "boolean", description: "Whether the course is public to authenticated users" },
-        public_syllabus: { type: "boolean", description: "Whether the syllabus is public" },
-        public_syllabus_to_auth: { type: "boolean", description: "Whether the syllabus is public to authenticated users" },
-        public_description: { type: "string", description: "Public description of the course" },
-        allow_student_wiki_edits: { type: "boolean", description: "Whether students can edit the wiki" },
-        allow_wiki_comments: { type: "boolean", description: "Whether wiki comments are allowed" },
-        allow_student_forum_attachments: { type: "boolean", description: "Whether students can add forum attachments" },
-        open_enrollment: { type: "boolean", description: "Whether the course has open enrollment" },
-        self_enrollment: { type: "boolean", description: "Whether the course allows self enrollment" },
-        restrict_enrollments_to_course_dates: { type: "boolean", description: "Whether to restrict enrollments to course start/end dates" },
-        hide_final_grades: { type: "boolean", description: "Whether to hide final grades" },
-        apply_assignment_group_weights: { type: "boolean", description: "Whether to apply assignment group weights" },
-        time_zone: { type: "string", description: "Course time zone" },
+        start_at: { type: "string", description: "ISO 8601" },
+        end_at: { type: "string", description: "ISO 8601" },
+        license: { type: "string" },
+        is_public: { type: "boolean" },
+        is_public_to_auth_users: { type: "boolean" },
+        public_syllabus: { type: "boolean" },
+        public_syllabus_to_auth: { type: "boolean" },
+        public_description: { type: "string" },
+        allow_student_wiki_edits: { type: "boolean" },
+        allow_wiki_comments: { type: "boolean" },
+        allow_student_forum_attachments: { type: "boolean" },
+        open_enrollment: { type: "boolean" },
+        self_enrollment: { type: "boolean" },
+        restrict_enrollments_to_course_dates: { type: "boolean" },
+        hide_final_grades: { type: "boolean" },
+        apply_assignment_group_weights: { type: "boolean" },
+        time_zone: { type: "string" },
         syllabus_body: { type: "string", description: "Updated syllabus content" }
       },
       required: ["course_id"]
@@ -868,149 +869,139 @@ type StreamableHttpRuntime = {
   httpServer: HttpServer;
 };
 
-const READ_ONLY_TOOL_PREFIXES = ["canvas_list_", "canvas_get_", "canvas_health_check"] as const;
-const MUTATING_TOOL_PREFIXES = [
-  "canvas_create_",
-  "canvas_update_",
-  "canvas_submit_",
-  "canvas_enroll_",
-  "canvas_mark_",
-  "canvas_post_",
-  "canvas_start_"
-] as const;
+export const ALL_TOOLSETS: readonly Toolset[] = ["student", "instructor", "admin"];
+const DEFAULT_TOOLSETS: readonly Toolset[] = ["student"];
 
-function toCommaList(values: string[]): string {
-  if (values.length === 0) {
-    return "none";
+// Tools that only work for teachers / account admins. Everything else is "student".
+const TOOLSET_BY_TOOL: Record<string, Toolset> = {
+  canvas_create_course: "instructor",
+  canvas_update_course: "instructor",
+  canvas_create_assignment: "instructor",
+  canvas_update_assignment: "instructor",
+  canvas_submit_grade: "instructor",
+  canvas_enroll_user: "instructor",
+  canvas_create_quiz: "instructor",
+  canvas_get_account: "admin",
+  canvas_list_account_courses: "admin",
+  canvas_list_account_users: "admin",
+  canvas_create_user: "admin",
+  canvas_list_sub_accounts: "admin",
+  canvas_get_account_reports: "admin",
+  canvas_create_account_report: "admin"
+};
+
+const READ_ONLY_TOOL_PREFIXES = ["canvas_list_", "canvas_get_", "canvas_health_check", "canvas_check_auth"] as const;
+
+// Tools whose result is an array, and therefore truncated unless include_raw=true.
+const LIST_RESULT_TOOLS = new Set([
+  "canvas_get_upcoming_assignments",
+  "canvas_get_dashboard_cards",
+  "canvas_get_course_grades",
+  "canvas_get_account_reports"
+]);
+
+const LIST_PREVIEW_LIMIT = 5;
+
+export function getToolset(toolName: string): Toolset {
+  return TOOLSET_BY_TOOL[toolName] ?? "student";
+}
+
+export function parseToolsets(value: string | undefined): Toolset[] {
+  const requested = (value ?? "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+
+  if (requested.length === 0) {
+    return [...DEFAULT_TOOLSETS];
+  }
+  if (requested.includes("all")) {
+    return [...ALL_TOOLSETS];
   }
 
-  return values.join(", ");
-}
-
-function getInputSchema(tool: Tool): Record<string, unknown> {
-  return (tool.inputSchema as Record<string, unknown> | undefined) ?? {};
-}
-
-function getRequiredFields(tool: Tool): string[] {
-  const schema = getInputSchema(tool);
-  const required = schema.required;
-  return Array.isArray(required) ? required.filter((value): value is string => typeof value === "string") : [];
-}
-
-function getDefaultFields(tool: Tool): string[] {
-  const schema = getInputSchema(tool);
-  const properties = schema.properties as Record<string, unknown> | undefined;
-  if (!properties) {
-    return [];
+  const unknown = requested.filter((entry) => !ALL_TOOLSETS.includes(entry as Toolset));
+  if (unknown.length > 0) {
+    throw new Error(
+      `Invalid CANVAS_TOOLSETS value(s): ${unknown.join(", ")}. Valid values: ${ALL_TOOLSETS.join(", ")}, all.`
+    );
   }
 
-  return Object.entries(properties)
-    .filter(([, property]) => {
-      if (!property || typeof property !== "object") {
-        return false;
-      }
-      return Object.prototype.hasOwnProperty.call(property, "default");
-    })
-    .map(([name]) => name);
+  return ALL_TOOLSETS.filter((toolset) => requested.includes(toolset));
 }
 
 function isReadOnlyTool(name: string): boolean {
   return READ_ONLY_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
-function isMutatingTool(name: string): boolean {
-  return MUTATING_TOOL_PREFIXES.some((prefix) => name.startsWith(prefix));
+function returnsList(name: string): boolean {
+  return name.startsWith("canvas_list_") || LIST_RESULT_TOOLS.has(name);
 }
 
-function optimizeToolDescription(tool: Tool): string {
-  const required = getRequiredFields(tool);
-  const defaults = getDefaultFields(tool);
-  const sideEffect = isReadOnlyTool(tool.name)
-    ? "No Canvas state is modified."
-    : "This operation can modify Canvas state.";
-  const latencyHint = isReadOnlyTool(tool.name)
-    ? "Latency depends on Canvas API response time."
-    : "May incur extra latency due to writes and Canvas-side processing.";
-
-  return [
-    tool.description ?? "Canvas LMS tool",
-    `Required fields: ${toCommaList(required)}.`,
-    `Defaults: ${defaults.length > 0 ? defaults.join(", ") : "none"}.`,
-    sideEffect,
-    latencyHint,
-    "Use include_raw=true only when full provider payload is required."
-  ].join(" ");
+// Annotations only carry values that differ from the MCP spec defaults
+// (readOnlyHint=false, destructiveHint=true, openWorldHint=true).
+function buildToolAnnotations(toolName: string): Tool["annotations"] {
+  return isReadOnlyTool(toolName) ? { readOnlyHint: true } : { destructiveHint: false };
 }
 
-function optimizeToolAnnotations(toolName: string): Tool["annotations"] {
-  if (isReadOnlyTool(toolName)) {
-    return {
-      readOnlyHint: true,
-      destructiveHint: false,
-      openWorldHint: true
-    };
-  }
-
-  if (isMutatingTool(toolName)) {
-    return {
-      readOnlyHint: false,
-      destructiveHint: false,
-      openWorldHint: true
-    };
-  }
-
-  return {
-    readOnlyHint: false,
-    destructiveHint: false,
-    openWorldHint: true
-  };
-}
-
-function optimizeToolInputSchema(tool: Tool): Tool["inputSchema"] {
-  const schema = getInputSchema(tool);
-  const properties =
-    (schema.properties as Record<string, unknown> | undefined) ??
-    {};
-  const required =
-    (schema.required as string[] | undefined) ??
-    [];
-
-  const optimizedProperties: Record<string, unknown> = {
-    ...properties
+function buildToolInputSchema(tool: Tool): Tool["inputSchema"] {
+  const { properties = {}, required = [] } = tool.inputSchema as {
+    properties?: Record<string, unknown>;
+    required?: string[];
   };
 
-  if (!Object.prototype.hasOwnProperty.call(optimizedProperties, "include_raw")) {
-    optimizedProperties.include_raw = {
+  const schemaProperties: Record<string, unknown> = { ...properties };
+  if (returnsList(tool.name)) {
+    schemaProperties.include_raw = {
       type: "boolean",
-      default: false,
-      description: "When true, return full raw Canvas API payload for this tool call."
+      description: `Return every item with all fields (default: first ${LIST_PREVIEW_LIMIT}, nulls omitted).`
     };
   }
 
   return {
     type: "object",
-    ...schema,
-    properties: optimizedProperties,
-    required,
+    properties: schemaProperties,
+    ...(required.length > 0 ? { required } : {}),
     additionalProperties: false
   } as Tool["inputSchema"];
 }
 
 const TOOLS: Tool[] = RAW_TOOLS.map((tool) => ({
   ...tool,
-  description: optimizeToolDescription(tool),
-  inputSchema: optimizeToolInputSchema(tool),
-  annotations: optimizeToolAnnotations(tool.name)
+  inputSchema: buildToolInputSchema(tool),
+  annotations: buildToolAnnotations(tool.name)
 }));
+
+export function getToolsForToolsets(toolsets: readonly Toolset[]): Tool[] {
+  return TOOLS.filter((tool) => toolsets.includes(getToolset(tool.name)));
+}
+
+// Drops null/undefined values so Canvas' many empty fields don't eat context.
+function stripNulls(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(stripNulls);
+  }
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value)
+        .filter(([, entry]) => entry !== null && entry !== undefined)
+        .map(([key, entry]) => [key, stripNulls(entry)])
+    );
+  }
+  return value;
+}
 
 export class CanvasMCPServer {
   private readonly server: Server;
   private readonly client: CanvasClient;
   private config: MCPServerConfig;
   private streamableHttpRuntime: StreamableHttpRuntime | undefined;
+  private readonly tools: Tool[];
+  private readonly toolNames: Set<string>;
 
   constructor(config: MCPServerConfig, client?: CanvasClient) {
     this.config = config;
+    this.tools = getToolsForToolsets(config.toolsets ?? DEFAULT_TOOLSETS);
+    this.toolNames = new Set(this.tools.map((tool) => tool.name));
     this.client = client ?? new CanvasClient(
       config.canvas.token,
       config.canvas.domain,
@@ -1083,24 +1074,21 @@ export class CanvasMCPServer {
     };
   }
 
+  // Compact JSON (no indentation) keeps tool results small; models don't need whitespace.
   private serializeToolOutput(payload: unknown, includeRaw: boolean): string {
     if (includeRaw) {
-      return JSON.stringify(payload, null, 2);
+      return JSON.stringify(payload);
     }
 
     if (Array.isArray(payload)) {
-      return JSON.stringify(
-        {
-          count: payload.length,
-          items: payload.slice(0, 5),
-          has_more: payload.length > 5
-        },
-        null,
-        2
-      );
+      return JSON.stringify({
+        count: payload.length,
+        items: stripNulls(payload.slice(0, LIST_PREVIEW_LIMIT)),
+        has_more: payload.length > LIST_PREVIEW_LIMIT
+      });
     }
 
-    return JSON.stringify(payload, null, 2);
+    return JSON.stringify(stripNulls(payload));
   }
 
   private isRetryable(error: unknown): boolean {
@@ -1329,7 +1317,7 @@ export class CanvasMCPServer {
           contents: [{
             uri: request.params.uri,
             mimeType: "application/json",
-            text: JSON.stringify(content, null, 2)
+            text: JSON.stringify(content)
           }]
         };
       } catch (error) {
@@ -1338,7 +1326,7 @@ export class CanvasMCPServer {
           contents: [{
             uri: request.params.uri,
             mimeType: "application/json",
-            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) }, null, 2)
+            text: JSON.stringify({ error: error instanceof Error ? error.message : String(error) })
           }]
         };
       }
@@ -1346,7 +1334,7 @@ export class CanvasMCPServer {
 
     // List available tools
     this.server.setRequestHandler(ListToolsRequestSchema, async () => ({
-      tools: TOOLS
+      tools: this.tools
     }));
 
     // Handle tool calls with comprehensive error handling
@@ -1358,6 +1346,15 @@ export class CanvasMCPServer {
         const toolName = request.params.name;
         
         console.error(`[Canvas MCP] Executing tool: ${toolName}`);
+
+        if (!this.toolNames.has(toolName)) {
+          const toolset = TOOLS.some((tool) => tool.name === toolName) ? getToolset(toolName) : undefined;
+          throw new Error(
+            toolset
+              ? `Unknown tool: ${toolName} (disabled; add "${toolset}" to CANVAS_TOOLSETS to enable it)`
+              : `Unknown tool: ${toolName}`
+          );
+        }
 
         // Auth guard: block all tools except auth tools if no token
         const AUTH_EXEMPT_TOOLS = ['canvas_authenticate', 'canvas_check_auth'];
@@ -1378,7 +1375,7 @@ export class CanvasMCPServer {
                   message: "Not authenticated with Canvas. No access token available.",
                   suggestion: "Call the canvas_authenticate tool to set up authentication (credentials are read from CANVAS_EMAIL and CANVAS_PASSWORD env vars). You should only have to do this once. If you have issues, go to Settings > Access Tokens in Canvas.",
                   tool: toolName
-                }, null, 2)
+                })
               }],
               isError: true
             };
@@ -1443,7 +1440,7 @@ export class CanvasMCPServer {
                   status: "authenticated",
                   message: "Successfully authenticated with Canvas. You should only have to run this once. If you have any issues, go to Settings > Access Tokens in Canvas.",
                   user: tokens.user,
-                }, null, 2)
+                })
               }]
             };
           }
@@ -1472,7 +1469,7 @@ export class CanvasMCPServer {
             }
 
             return {
-              content: [{ type: "text", text: JSON.stringify(status, null, 2) }]
+              content: [{ type: "text", text: JSON.stringify(status) }]
             };
           }
 
@@ -2070,7 +2067,7 @@ export class CanvasMCPServer {
         return {
           content: [{
             type: "text",
-            text: JSON.stringify(structuredError, null, 2)
+            text: JSON.stringify(structuredError)
           }],
           structuredContent: structuredError,
           isError: true
@@ -2270,7 +2267,7 @@ export function loadEnvironmentVariables(): void {
 
   let loaded = false;
   for (const envPath of envPaths) {
-    const result = dotenv.config({ path: envPath });
+    const result = dotenv.config({ path: envPath, quiet: true });
     if (result.parsed) {
       console.error(`Loaded environment from: ${envPath}`);
       loaded = true;
@@ -2313,6 +2310,7 @@ export function loadConfigFromEnvironment(env = process.env): MCPServerConfig {
   return {
     name: "canvas-mcp-server",
     version: "2.3.0",
+    toolsets: parseToolsets(env.CANVAS_TOOLSETS),
     canvas: {
       token,
       domain,
